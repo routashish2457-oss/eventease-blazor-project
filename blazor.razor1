@@ -1,0 +1,151 @@
+// EventEaseApp.razor (single file demo)
+// This file combines Program.cs, services, models, components, and pages in one place.
+// For real projects, split into separate files.
+
+@using System.ComponentModel.DataAnnotations
+@using Microsoft.AspNetCore.Components
+@using Microsoft.AspNetCore.Components.Forms
+@using Microsoft.AspNetCore.Components.Routing
+@using Microsoft.AspNetCore.Components.Web
+@using Microsoft.AspNetCore.Components.WebAssembly.Hosting
+@using System.Linq
+
+@code {
+// -------------------- MODELS --------------------
+public class Event
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    [Required] public string Name { get; set; } = "";
+    [Required] public DateTime Date { get; set; } = DateTime.Today.AddDays(7);
+    [Required] public string Location { get; set; } = "Bhubaneswar";
+    public string Description { get; set; } = "";
+    public int Capacity { get; set; } = 50;
+}
+
+public class Registration
+{
+    public Guid EventId { get; set; }
+    [Required] public string FullName { get; set; } = "";
+    [Required, EmailAddress] public string Email { get; set; } = "";
+    public string? Phone { get; set; }
+}
+
+public class AttendanceRecord
+{
+    public Guid EventId { get; set; }
+    public string AttendeeEmail { get; set; } = "";
+    public bool IsPresent { get; set; }
+}
+
+// -------------------- SERVICES --------------------
+public class EventService
+{
+    private readonly List<Event> _events = new()
+    {
+        new Event { Name="Tech Meetup", Location="KIIT Auditorium", Description="Community meetup", Capacity=100, Date=DateTime.Today.AddDays(10) },
+        new Event { Name="Startup Pitch Night", Location="Infocity Hub", Description="Pitch ideas", Capacity=80, Date=DateTime.Today.AddDays(15) }
+    };
+    private readonly Dictionary<Guid,List<Registration>> _registrations = new();
+    private readonly Dictionary<Guid,List<AttendanceRecord>> _attendance = new();
+
+    public IEnumerable<Event> GetEvents() => _events;
+    public void UpdateEvent(Event ev) { var i=_events.FindIndex(e=>e.Id==ev.Id); if(i>=0) _events[i]=ev; }
+    public void AddRegistration(Registration r) {
+        if(!_registrations.ContainsKey(r.EventId)) _registrations[r.EventId]=new();
+        if(!_registrations[r.EventId].Any(x=>x.Email==r.Email)) _registrations[r.EventId].Add(r);
+    }
+    public IEnumerable<Registration> GetRegistrations(Guid id)=>_registrations.ContainsKey(id)?_registrations[id]:Enumerable.Empty<Registration>();
+    public void ToggleAttendance(Guid id,string email,bool present){
+        if(!_attendance.ContainsKey(id)) _attendance[id]=new();
+        var rec=_attendance[id].FirstOrDefault(a=>a.AttendeeEmail==email);
+        if(rec==null) _attendance[id].Add(new AttendanceRecord{EventId=id,AttendeeEmail=email,IsPresent=present});
+        else rec.IsPresent=present;
+    }
+    public IEnumerable<AttendanceRecord> GetAttendance(Guid id)=>_attendance.ContainsKey(id)?_attendance[id]:Enumerable.Empty<AttendanceRecord>();
+}
+
+public class SessionService
+{
+    public string? CurrentUserName {get;private set;}
+    public string? CurrentUserEmail {get;private set;}
+    public void SetUser(string n,string e){CurrentUserName=n;CurrentUserEmail=e;}
+    public void Clear(){CurrentUserName=null;CurrentUserEmail=null;}
+    public bool IsLoggedIn=>!string.IsNullOrWhiteSpace(CurrentUserEmail);
+}
+
+// -------------------- COMPONENTS --------------------
+@code {
+    EventService Events = new();
+    SessionService Session = new();
+    List<Event> events;
+    Registration reg = new();
+    Guid selectedEventId;
+    string? message;
+    List<Registration> regs=new();
+    List<AttendanceRecord> att=new();
+
+    protected override void OnInitialized(){
+        events=Events.GetEvents().ToList();
+        if(events.Count>0){selectedEventId=events[0].Id;}
+        LoadAttendance();
+    }
+
+    void Save(Event ev)=>Events.UpdateEvent(ev);
+    void Submit(){
+        Events.AddRegistration(reg);
+        Session.SetUser(reg.FullName,reg.Email);
+        message="Registered!";
+        reg=new Registration{EventId=events.First().Id};
+    }
+    void LoadAttendance(){
+        regs=Events.GetRegistrations(selectedEventId).ToList();
+        att=Events.GetAttendance(selectedEventId).ToList();
+    }
+    void Toggle(string email,bool present){Events.ToggleAttendance(selectedEventId,email,present);LoadAttendance();}
+}
+
+// -------------------- UI --------------------
+<h3>EventEase App</h3>
+
+<h4>Events</h4>
+@foreach(var ev in events){
+    <div style="border:1px solid #ccc;padding:8px;margin:4px;">
+        <input @bind="ev.Name" />
+        <input type="date" @bind="ev.Date" />
+        <input @bind="ev.Location" />
+        <textarea @bind="ev.Description"></textarea>
+        <input type="number" @bind="ev.Capacity" />
+        <button @onclick="@(()=>Save(ev))">Save</button>
+    </div>
+}
+
+<h4>Register</h4>
+<EditForm Model="reg" OnValidSubmit="Submit">
+    <DataAnnotationsValidator />
+    <ValidationSummary />
+    <select @bind="reg.EventId">
+        @foreach(var ev in events){<option value="@ev.Id">@ev.Name</option>}
+    </select>
+    <InputText @bind-Value="reg.FullName" />
+    <InputText @bind-Value="reg.Email" />
+    <InputText @bind-Value="reg.Phone" />
+    <button type="submit">Register</button>
+</EditForm>
+@if(message!=null){<p>@message</p>}
+
+<h4>Attendance</h4>
+<select @bind="selectedEventId" @onchange="LoadAttendance">
+    @foreach(var ev in events){<option value="@ev.Id">@ev.Name</option>}
+</select>
+<table>
+    <thead><tr><th>Name</th><th>Email</th><th>Present</th></tr></thead>
+    <tbody>
+    @foreach(var r in regs){
+        var present=att.Any(a=>a.AttendeeEmail==r.Email && a.IsPresent);
+        <tr>
+            <td>@r.FullName</td><td>@r.Email</td>
+            <td><input type="checkbox" checked="@present" @onchange="(e)=>Toggle(r.Email,(bool)e.Value)" /></td>
+        </tr>
+    }
+    </tbody>
+</table>
